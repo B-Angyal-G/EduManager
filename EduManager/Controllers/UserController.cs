@@ -2,12 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using AutoMapper;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using EduManager.Data;
 using EduManager.DTO.UserDto;
 using EduManager.Entities;
+using EduManager.Repository;
 
 namespace EduManager.Controllers
 {
@@ -16,199 +18,116 @@ namespace EduManager.Controllers
     [ApiController]
     public class UserController : ControllerBase
     {
-        private readonly EduDbContext _context;
+        private readonly IUnitOfWork _unitOfWork;
+        private readonly IMapper _mapper;
 
-        public UserController(EduDbContext context)
+        public UserController(IUnitOfWork unitOfWork, IMapper mapper)
         {
-            _context = context;
+            _unitOfWork = unitOfWork;
+            _mapper = mapper;
         }
 
-        
+
         // GET: api/User
         [HttpGet]
         public async Task<ActionResult<IEnumerable<UserGetDTO>>> GetUsers()
         {
-            return await _context.Users
-                .Where(u => u.IsActive)
-                .Select(u => new UserGetDTO
-                {
-                    Id = u.Id,
-                    Username = u.Username,
-                    Email = u.Email,
-                    Role = u.Role.ToString(),
-                    StudyMode = u.StudyMode.ToString(),
-                    IsActive = u.IsActive
-                })
-                .ToListAsync();
+            var users = await _unitOfWork.UserRepository.GetAllAsync(u => u.IsActive);
 
-            // DTO előtti
-            // Csak az aktívakat kérjük le
-            // return await _context.Users.Where(u => u.IsActive).ToListAsync();
+            var dtos = _mapper.Map<List<UserGetDTO>>(users);
+
+            return Ok(dtos);
         }
 
-        
+
         // GET: api/User/5
         [HttpGet("{id}")]
         public async Task<ActionResult<UserGetDTO>> GetUser(int id)
         {
-            var user = await _context.Users.FindAsync(id);
+            var user = await _unitOfWork.UserRepository.FindByIdAsync(id);
 
-            if (user == null)
-            {
-                return NotFound();
-            }
+            if (user == null || !user.IsActive) return NotFound();
 
-            var userDto = new UserGetDTO()
-            {
-                Id = user.Id,
-                Username = user.Username,
-                Email = user.Email,
-                Role = user.Role.ToString(),
-                StudyMode = user.StudyMode.ToString(),
-                IsActive = user.IsActive
-            };
-
-            return userDto;
+            return Ok(_mapper.Map<UserGetDTO>(user));
         }
 
-        
+
         // PUT: api/User/5
         // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
         [HttpPut("{id}")]
         public async Task<IActionResult> PutUser(int id, UserUpdateDTO dto)
         {
-            // 1. Alapvető ellenőrzés: az URL-ben lévő ID egyezik-e a JSON-ben lévővel?
-            if (id != dto.Id)
+            if (id != dto.Id) return BadRequest("Az ID-k nem egyeznek.");
+
+            var user = await _unitOfWork.UserRepository.FindByIdAsync(id);
+            if (user == null) return NotFound();
+
+            // E-mail ellenőrzés: ha változott, ne legyen foglalt
+            if (user.Email != dto.Email)
             {
-                return BadRequest("Az ID-k nem egyeznek.");
+                var emailExists = await _unitOfWork.UserRepository.GetAllAsync(u => u.Email == dto.Email);
+                if (emailExists.Any()) return BadRequest("Az új e-mail cím már foglalt.");
             }
 
-            // 2. Megkeressük az EREDETI felhasználót az adatbázisban
-            var existingUser = await _context.Users.FindAsync(id);
+            _mapper.Map(dto, user);
 
-            if (existingUser == null)
+            if (user.Role == UserRole.Student)
             {
-                return NotFound();
-            }
-
-            // 3. E-mail ellenőrzése: Ha megváltoztatta az e-mailt, nézzük meg, nem foglalt-e?
-            if (existingUser.Email != dto.Email && await _context.Users.AnyAsync(u => u.Email == dto.Email))
-            {
-                return BadRequest("Ez az e-mail cím már foglalt.");
-            }
-            
-            // 4. Munkarend beállítása hallgató feltételnek megfelelően
-            if (existingUser.Role == UserRole.Student)
-            {
-                // Ha hallgatóról van szó, kötelező a Nappali vagy Levelező
-                if (dto.StudyMode == (int)StudyMode.None)
-                {
-                    return BadRequest("Hallgató munkarendje nem állítható 'None' értékre!");
-                }
-                existingUser.StudyMode = (StudyMode)dto.StudyMode;
+                if (dto.StudyMode == (int)StudyMode.None) return BadRequest("Hallgató munkarendje nem lehet None.");
             }
             else
             {
-                // Ha oktató vagy ügyintéző, kényszerítjük a None-t, bármit is küldtek a JSON-ben
-                existingUser.StudyMode = StudyMode.None;
+                user.StudyMode = StudyMode.None;
             }
-            
-            // 5. Frissítjük a megengedett mezőket
-            existingUser.Username = dto.Username;
-            existingUser.Email = dto.Email;
 
-            try
-            {
-                await _context.SaveChangesAsync();
-            }
-            catch (DbUpdateConcurrencyException)
-            {
-                if (!UserExists(id)) return NotFound();
-                else throw;
-            }
+            _unitOfWork.UserRepository.Update(user);
+            await _unitOfWork.SaveAsync();
 
             return NoContent();
         }
 
-        
+
         // POST: api/User
         // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
         [HttpPost]
-        public async Task<ActionResult<User>> PostUser(UserCreateDTO dto)
+        public async Task<ActionResult<UserGetDTO>> PostUser(UserCreateDTO dto)
         {
-            // 1. Ellenőrzés: létezik-e már ilyen e-mail? (Specifikáció!)
-            if (await _context.Users.AnyAsync(u => u.Email == dto.Email))
-            {
-                return BadRequest("Ez az e-mail cím már regisztrálva van.");
-            }
-            
-            StudyMode finalStudyMode;
+            // E-mail egyediség ellenőrzése
+            var existing = await _unitOfWork.UserRepository.GetAllAsync(u => u.Email == dto.Email);
+            if (existing.Any()) return BadRequest("Ez az e-mail cím már foglalt.");
 
-            if (dto.Role == (int)UserRole.Student)
+            var user = _mapper.Map<User>(dto);
+
+            if (user.Role == UserRole.Student)
             {
-                // Ha diák, de None-t küldtek vagy érvénytelen értéket
-                if (dto.StudyMode == (int)StudyMode.None)
-                {
-                    return BadRequest("Hallgató esetén kötelező a nappali vagy levelező munkarend!");
-                }
-                finalStudyMode = (StudyMode)dto.StudyMode;
+                if (user.StudyMode == StudyMode.None) return BadRequest("Hallgató esetén a munkarend kötelező.");
             }
             else
             {
-                // Ha nem diák, kényszerítjük a None értéket, 
-                // bármit is küldött a kliens a JSON-ben.
-                finalStudyMode = StudyMode.None;
+                user.StudyMode = StudyMode.None;
             }
-            
-            // 2. Mapping: DTO -> Entity
-            var user = new User
-            {
-                Username = dto.Username,
-                Email = dto.Email,
-                Password = dto.Password,
-                Role = (UserRole)dto.Role,
-                StudyMode = finalStudyMode,
-                IsActive = true
-            };
 
-            // 3. Mentés
-            _context.Users.Add(user);
-            await _context.SaveChangesAsync();
+            user.IsActive = true;
 
-            // 4. Válasz DTO formátumban
-            var responseDto = new UserGetDTO
-            {
-                Id = user.Id,
-                Username = user.Username,
-                Email = user.Email,
-                Role = user.Role.ToString(),
-                StudyMode = user.StudyMode.ToString(),
-                IsActive = user.IsActive
-            };
+            _unitOfWork.UserRepository.Add(user);
+            await _unitOfWork.SaveAsync();
 
-            return CreatedAtAction(nameof(GetUser), new { id = user.Id }, responseDto);
+            return CreatedAtAction(nameof(GetUser), new { id = user.Id }, _mapper.Map<UserGetDTO>(user));
         }
 
-        
+
         // POST: api/users/5/deactivate
         [HttpPost("{id}/deactivate")]
         public async Task<IActionResult> DeactivateUser(int id)
         {
-            var user = await _context.Users.FindAsync(id);
-            if (user == null)
-            {
-                return NotFound();
-            }
-
-            if (!user.IsActive)
-            {
-                return BadRequest("A felhasználó már alapból inaktív.");
-            }
+            var user = await _unitOfWork.UserRepository.FindByIdAsync(id);
+            if (user == null) return NotFound();
 
             user.IsActive = false;
-            await _context.SaveChangesAsync();
+            _unitOfWork.UserRepository.Update(user);
+            await _unitOfWork.SaveAsync();
 
-            return Ok(new { message = $"User {id} deactivated successfully." });
+            return Ok(new { message = "Felhasználó inaktiválva." });
         }
 
         
@@ -216,27 +135,14 @@ namespace EduManager.Controllers
         [HttpPost("{id}/reactivate")]
         public async Task<IActionResult> ReactivateUser(int id)
         {
-            var user = await _context.Users.FindAsync(id);
-            if (user == null)
-            {
-                return NotFound();
-            }
-
-            if (user.IsActive)
-            {
-                return BadRequest("A felhasználó már alapból aktív.");
-            }
+            var user = await _unitOfWork.UserRepository.FindByIdAsync(id);
+            if (user == null) return NotFound();
 
             user.IsActive = true;
-            await _context.SaveChangesAsync();
+            _unitOfWork.UserRepository.Update(user);
+            await _unitOfWork.SaveAsync();
 
-            return Ok(new { message = $"User {id} reactivated successfully." });
-        }
-
-
-        private bool UserExists(int id)
-        {
-            return _context.Users.Any(e => e.Id == id);
+            return Ok(new { message = "Felhasználó újra aktiválva." });
         }
     }
 }

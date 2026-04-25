@@ -2,12 +2,16 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using AutoMapper;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using EduManager.Data;
 using EduManager.DTO.CourseDTO;
+using EduManager.DTO.ScheduleDTO;
+using EduManager.DTO.UserDto;
 using EduManager.Entities;
+using EduManager.Repository;
 
 namespace EduManager.Controllers
 {
@@ -16,113 +20,55 @@ namespace EduManager.Controllers
     [ApiController]
     public class CourseController : ControllerBase
     {
-        private readonly EduDbContext _context;
+        private readonly IUnitOfWork _unitOfWork;
+        private readonly IMapper _mapper;
 
-        public CourseController(EduDbContext context)
+        public CourseController(IUnitOfWork unitOfWork, IMapper mapper)
         {
-            _context = context;
+            _unitOfWork = unitOfWork;
+            _mapper = mapper;
         }
 
         // GET: api/Course
         [HttpGet]
         public async Task<ActionResult<IEnumerable<CourseGetDTO>>> GetCourses()
         {
-            var courses = await _context.Courses
-                .Include(c => c.Subject)
-                .Include(c => c.Teachers)
-                .Select(c => new CourseGetDTO
-                {
-                    Id = c.Id,
-                    CourseCode = c.CourseCode,
-                    SubjectName = c.Subject != null ? c.Subject.Name : "Ismeretlen tárgy",
-                    Semester = c.Semester,
-                    MaxStudents = c.MaxStudents,
-                    Type = c.Type.ToString(),
-                    Form = c.Form.ToString(),
-                    HoursDescription = $"{c.Hours} {(c.HourUnit == HourType.Weekly ? "heti" : "féléves")}",
-                    TeacherNames = c.Teachers.Select(t => t.Username).ToList()
-                })
-                .ToListAsync();
-
-            return Ok(courses);
+            var includes = new[] { "Subject", "Teachers" };
+            var courses = await _unitOfWork.CourseRepository.GetAllAsync(null, includes);
+            return Ok(_mapper.Map<List<CourseGetDTO>>(courses));
         }
 
         
         // GET: api/Course/5
         [HttpGet("{id}")]
-        public async Task<ActionResult<CourseGetDTO>> GetCourse(int courseId)
+        public async Task<ActionResult<CourseGetDTO>> GetCourse(int id)
         {
-            var course = await _context.Courses
-                .Include(c => c.Subject)
-                .Include(c => c.Teachers)
-                .FirstOrDefaultAsync(c => c.Id == courseId);
+            var includes = new[] { "Subject", "Teachers" };
+        
+            // Szűrés ID alapján az include-okkal együtt
+            var courses = await _unitOfWork.CourseRepository.GetAllAsync(c => c.Id == id, includes);
+            var course = courses.FirstOrDefault();
 
-            if (course == null)
-            {
-                return NotFound();
-            }
+            if (course == null) return NotFound();
 
-            var dto = new CourseGetDTO
-            {
-                Id = course.Id,
-                CourseCode = course.CourseCode,
-                SubjectName = course.Subject?.Name ?? "Ismeretlen tárgy",
-                Semester = course.Semester,
-                MaxStudents = course.MaxStudents,
-                Type = course.Type.ToString(),
-                Form = course.Form.ToString(),
-                HoursDescription = $"{course.Hours} {(course.HourUnit == HourType.Weekly ? "heti" : "féléves")}",
-                TeacherNames = course.Teachers.Select(t => t.Username).ToList()
-            };
-
-            return Ok(dto);
+            return Ok(_mapper.Map<CourseGetDTO>(course));
         }
 
         
         // PUT: api/Course/5
         // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
         [HttpPut("{id}")]
-        public async Task<IActionResult> PutCourse(int courseId, CourseUpdateDTO dto)
+        public async Task<IActionResult> PutCourse(int id, CourseUpdateDTO dto)
         {
-            if (courseId != dto.Id)
-            {
-                return BadRequest("Az URL-ben szereplő és a testben küldött ID nem egyezik.");
-            }
+            if (id != dto.Id) return BadRequest("Az ID-k nem egyeznek.");
 
-            // Megkeressük a meglévő kurzust (oktatók nélkül is elég, mert azokhoz nem nyúlunk)
-            var existingCourse = await _context.Courses.FindAsync(courseId);
-
-            if (existingCourse == null)
-            {
-                return NotFound();
-            }
-
-            // Kurzuskód egyediség ellenőrzése, ha megváltozott
-            if (existingCourse.CourseCode != dto.CourseCode && 
-                await _context.Courses.AnyAsync(c => c.CourseCode == dto.CourseCode))
-            {
-                return BadRequest("Ez a kurzuskód már foglalt egy másik kurzusnál.");
-            }
-
-            // Adatok frissítése
-            existingCourse.CourseCode = dto.CourseCode;
-            existingCourse.Semester = dto.Semester;
-            existingCourse.MaxStudents = dto.MaxStudents;
-            existingCourse.Type = dto.Type;
-            existingCourse.Form = dto.Form;
-            existingCourse.Hours = dto.Hours;
-            existingCourse.HourUnit = dto.HourUnit;
+            var course = await _unitOfWork.CourseRepository.FindByIdAsync(id);
+            if (course == null) return NotFound();
             
+           _mapper.Map(dto, course);
 
-            try
-            {
-                await _context.SaveChangesAsync();
-            }
-            catch (DbUpdateConcurrencyException)
-            {
-                if (!CourseExists(courseId)) return NotFound();
-                else throw;
-            }
+            _unitOfWork.CourseRepository.Update(course);
+            await _unitOfWork.SaveAsync();
 
             return NoContent();
         }
@@ -133,105 +79,150 @@ namespace EduManager.Controllers
         [HttpPost]
         public async Task<ActionResult<CourseGetDTO>> PostCourse(CourseCreateDTO dto)
         {
-            // 1. Tantárgy kikeresése és ellenőrzése
-            var subject = await _context.Subjects
-                .FirstOrDefaultAsync(s => s.Code == dto.SubjectCode);
+            // 1. Tantárgy kikeresése kód alapján
+            var subjects = await _unitOfWork.SubjectRepository.GetAllAsync(s => s.Code == dto.SubjectCode);
+            var subject = subjects.FirstOrDefault();
 
-            if (subject == null)
-            {
-                return BadRequest($"Nem található tantárgy ezzel a kóddal: {dto.SubjectCode}");
-            }
+            if (subject == null) return BadRequest("A megadott tantárgykód nem létezik.");
+            if (!subject.IsActive) return BadRequest("Inaktív tantárgyhoz nem hirdethető kurzus.");
 
-            // Csak aktív tárgyhoz hirdethető kurzus
-            if (!subject.IsActive)
-            {
-                return BadRequest("Inaktív tantárgyhoz nem hirdethető új kurzus.");
-            }
-
-            // 2. Kurzuskód egyediség ellenőrzése
-            if (await _context.Courses.AnyAsync(c => c.CourseCode == dto.CourseCode))
-            {
-                return BadRequest("Ez a kurzuskód már foglalt.");
-            }
-
-            // 3. Oktatók ellenőrzése
-            // Csak azokat a felhasználókat keressük ki, akiknek az ID-ja benne van a listában és oktatók
-            var teachers = await _context.Users
-                .Where(u => dto.TeacherIds.Contains(u.Id) && u.Role == UserRole.Teacher)
-                .ToListAsync();
+            // 2. Oktatók kikeresése ID lista alapján
+            var teachers = await _unitOfWork.UserRepository.GetAllAsync(u => 
+                dto.TeacherIds.Contains(u.Id) && u.Role == UserRole.Teacher);
 
             if (teachers.Count != dto.TeacherIds.Count)
-            {
-                return BadRequest("Egy vagy több megadott oktató ID érvénytelen, vagy a felhasználó nem oktató.");
-            }
+                return BadRequest("Egy vagy több oktató érvénytelen vagy nem tanár szerepkörű.");
 
-            // 4. Kurzus entitás létrehozása és adatok leképezése
-            var course = new Course
-            {
-                CourseCode = dto.CourseCode,
-                SubjectId = subject.Id,
-                Semester = dto.Semester,
-                MaxStudents = dto.MaxStudents,
-                Type = dto.Type,
-                Form = dto.Form,
-                Hours = dto.Hours,
-                HourUnit = dto.HourUnit,
-                Teachers = teachers
-            };
+            // 3. Mappolás és mentés
+            var course = _mapper.Map<Course>(dto);
+            course.SubjectId = subject.Id;
+            course.Teachers = teachers;
 
-            _context.Courses.Add(course);
-            await _context.SaveChangesAsync();
+            _unitOfWork.CourseRepository.Add(course);
+            await _unitOfWork.SaveAsync();
 
-            // 5. Válasz DTO összeállítása
-            var responseDto = new CourseGetDTO
-            {
-                Id = course.Id,
-                CourseCode = course.CourseCode,
-                SubjectName = subject.Name,
-                Semester = course.Semester,
-                MaxStudents = course.MaxStudents,
-                Type = course.Type.ToString(),
-                Form = course.Form.ToString(),
-                HoursDescription = $"{course.Hours} {(course.HourUnit == HourType.Weekly ? "heti" : "féléves")}",
-                TeacherNames = teachers.Select(t => t.Username).ToList()
-            };
-
-            return CreatedAtAction(nameof(GetCourse), new { courseId = course.Id }, responseDto);
+            // A visszatérő DTO-hoz újra leképezzük (hogy a SubjectName is benne legyen)
+            return CreatedAtAction(nameof(GetCourse), new { id = course.Id }, _mapper.Map<CourseGetDTO>(course));
         }
 
         
         // DELETE: api/Course/5
         [HttpDelete("{id}")]
-        public async Task<IActionResult> DeleteCourse(int courseId)
+        public async Task<IActionResult> DeleteCourse(int id)
         {
-            // 1. Megkeressük a kurzust, és betöltjük a hallgatóit is
-            var course = await _context.Courses
-                .Include(c => c.Students) 
-                .FirstOrDefaultAsync(c => c.Id == courseId);
+            // Ellenőrzés: vannak-e rajta hallgatók?
+            var includes = new[] { "Students" };
+            var courses = await _unitOfWork.CourseRepository.GetAllAsync(c => c.Id == id, includes);
+            var course = courses.FirstOrDefault();
 
-            // 2. Ha nem létezik a kurzus
-            if (course == null)
-            {
-                return NotFound();
-            }
+            if (course == null) return NotFound();
 
-            // 3. Csak akkor törölhető, ha nincs rajta hallgató
             if (course.Students != null && course.Students.Any())
             {
-                return BadRequest("A kurzus nem törölhető, mert már vannak rá jelentkezett hallgatók. Előbb távolítsd el a hallgatókat!");
+                return BadRequest("A kurzus nem törölhető, mert vannak rá jelentkezett hallgatók.");
             }
 
-            // 4. Tényleges törlés
-            _context.Courses.Remove(course);
-            await _context.SaveChangesAsync();
+            _unitOfWork.CourseRepository.Delete(course);
+            await _unitOfWork.SaveAsync();
 
-            // 5. Sikeres törlés
             return NoContent();
         }
-
-        private bool CourseExists(int id)
+        
+        
+        
+        // <=== JELENTKEZÉSEK ===>
+        [HttpPost("change")]
+        public async Task<IActionResult> ChangeCourse(CourseChangeDTO dto)
         {
-            return _context.Courses.Any(e => e.Id == id);
+            var includes = new[] { "Students" };
+            var fromCourse = (await _unitOfWork.CourseRepository.GetAllAsync(c => c.Id == dto.FromCourseId, includes)).FirstOrDefault();
+            var toCourse = (await _unitOfWork.CourseRepository.GetAllAsync(c => c.Id == dto.ToCourseId, includes)).FirstOrDefault();
+            var student = await _unitOfWork.UserRepository.FindByIdAsync(dto.StudentId);
+
+            if (fromCourse == null || toCourse == null || student == null) 
+                return NotFound("Valamelyik adat érvénytelen.");
+
+            // Validálás: Ugyanaz a tárgy és típus?
+            if (fromCourse.SubjectId != toCourse.SubjectId || fromCourse.Type != toCourse.Type)
+                return BadRequest("Csak ugyanazon tárgyon belül, azonos típusú kurzusra lehet átjelentkezni.");
+
+            // Validálás: Van hely a célkurzuson?
+            if (toCourse.Students.Count >= toCourse.MaxStudents)
+                return BadRequest("A célkurzus betelt.");
+
+            // Validálás: Tagozat megfelel? (A tagozatellenőrzés ugyanaz, mint a regisztrációnál)
+            // ... (ide jöhet a tagozat ellenőrzése, ha nagyon precíz akarsz lenni)
+
+            fromCourse.Students.Remove(student);
+            toCourse.Students.Add(student);
+
+            _unitOfWork.CourseRepository.Update(fromCourse);
+            _unitOfWork.CourseRepository.Update(toCourse);
+            await _unitOfWork.SaveAsync();
+
+            return Ok(new { message = "Sikeres átjelentkezés!" });
+        }
+        
+        
+        [HttpGet("{courseId}/students")]
+        public async Task<ActionResult<IEnumerable<UserGetDTO>>> GetCourseStudents(int courseId)
+        {
+            var includes = new[] { "Students" };
+            var courses = await _unitOfWork.CourseRepository.GetAllAsync(c => c.Id == courseId, includes);
+            var course = courses.FirstOrDefault();
+    
+            if (course == null) return NotFound();
+
+            return Ok(_mapper.Map<List<UserGetDTO>>(course.Students));
+        }
+        
+        
+        
+        // <=== ÓRAREND ===>
+        /// <summary>
+        /// Órarendi időpontok megadása egy kurzushoz.
+        /// </summary>
+        /// <remarks>
+        /// Példa heti órára (Type: "weekly"): 14 héten át generál időpontokat a megadott naptól kezdve.
+        /// Példa tömbösített órára (Type: "blocked"): A listában megadott konkrét időpontokat menti el.
+        /// </remarks>
+        [HttpPost("{courseId}/schedule")]
+        public async Task<IActionResult> SetSchedule(int courseId, ScheduleCreateDTO dto)
+        {
+            var course = await _unitOfWork.CourseRepository.FindByIdAsync(courseId);
+            if (course == null) return NotFound();
+
+            var schedules = new List<CourseSchedule>();
+
+            if (dto.Type == "weekly")
+            {
+                if (!dto.FirstDate.HasValue || !dto.StartTime.HasValue || !dto.EndTime.HasValue || !dto.DayOfWeek.HasValue)
+                    return BadRequest("Heti rend esetén minden időpont adat kötelező.");
+
+                // 14 héten keresztül generálunk
+                for (int i = 0; i < 14; i++)
+                {
+                    var date = dto.FirstDate.Value.AddDays(i * 7);
+                    schedules.Add(new CourseSchedule
+                    {
+                        CourseId = courseId,
+                        StartTime = date.Date.Add(dto.StartTime.Value),
+                        EndTime = date.Date.Add(dto.EndTime.Value)
+                    });
+                }
+            }
+            else if (dto.Type == "blocked" && dto.Occurrences != null)
+            {
+                foreach (var occ in dto.Occurrences)
+                {
+                    schedules.Add(new CourseSchedule { CourseId = courseId, StartTime = occ.Start, EndTime = occ.End });
+                }
+            }
+
+            foreach (var s in schedules) _unitOfWork.CourseScheduleRepository.Add(s);
+            await _unitOfWork.SaveAsync();
+
+            return Ok(new { message = $"{schedules.Count} időpont rögzítve." });
         }
     }
 }

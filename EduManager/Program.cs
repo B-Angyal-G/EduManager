@@ -1,5 +1,8 @@
+using System.Reflection;
+using EduManager;
 using EduManager.Data;
 using Microsoft.EntityFrameworkCore;
+using EduManager.Repository;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -10,6 +13,9 @@ builder.Services.AddControllers();
 // Swagger generátor hozzáadása
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddAutoMapper(config => { }, Assembly.GetExecutingAssembly());
+builder.Services.AddScoped<IUnitOfWork, SimpleUnitOfWork>();
+builder.Services.AddHostedService<NotificationBackgroundService>();
 
 // builder.Services.AddDbContext<EduDbContext>(options => options.UseSqlServer("Server=localhost; Database=CourseManagerDB_WZFXSG; User Id=sa; Password=Password123!; TrustServerCertificate=True;"));
 builder.Services.AddDbContext<EduDbContext>(options => options.UseSqlServer("Server=localhost; Database=CourseManagerDB_WZFXSG; User Id=sa; Password=RentACar_2026!; TrustServerCertificate=True;"));

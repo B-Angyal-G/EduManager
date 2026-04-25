@@ -2,12 +2,15 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using AutoMapper;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using EduManager.Data;
 using EduManager.DTO.SubjectDTO;
+using EduManager.DTO.UserDto;
 using EduManager.Entities;
+using EduManager.Repository;
 
 namespace EduManager.Controllers
 {
@@ -16,11 +19,13 @@ namespace EduManager.Controllers
     [ApiController]
     public class SubjectController : ControllerBase
     {
-        private readonly EduDbContext _context;
+        private readonly IUnitOfWork _unitOfWork;
+        private readonly IMapper _mapper;
 
-        public SubjectController(EduDbContext context)
+        public SubjectController(IUnitOfWork unitOfWork, IMapper mapper)
         {
-            _context = context;
+            _unitOfWork = unitOfWork;
+            _mapper = mapper;
         }
 
         
@@ -28,75 +33,46 @@ namespace EduManager.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<SubjectGetDTO>>> GetSubjects()
         {
-            return await _context.Subjects
-                .Where(s => s.IsActive)
-                .Select(s => new SubjectGetDTO
-                {
-                    Id = s.Id,
-                    Code = s.Code,
-                    Name = s.Name,
-                    Credits = s.Credits,
-                    IsActive = s.IsActive
-                })
-                .ToListAsync();
+            // Csak az aktív tantárgyakat listázzuk
+            var subjects = await _unitOfWork.SubjectRepository.GetAllAsync(s => s.IsActive);
+            return Ok(_mapper.Map<List<SubjectGetDTO>>(subjects));
         }
 
         
         // GET: api/Subject/5
         [HttpGet("{subjectId}")]
-        public async Task<ActionResult<SubjectGetDTO>> GetSubject(int subjectId)
+        public async Task<ActionResult<SubjectGetDTO>> GetSubject(int id)
         {
-            var subject = await _context.Subjects.FindAsync(subjectId);
+            var subject = await _unitOfWork.SubjectRepository.FindByIdAsync(id);
 
-            if (subject == null)
-            {
-                return NotFound();
-            }
-            
-            return new SubjectGetDTO {
-                Id = subject.Id,
-                Code = subject.Code,
-                Name = subject.Name,
-                Credits = subject.Credits,
-                IsActive = subject.IsActive
-            };
+            if (subject == null || !subject.IsActive) return NotFound();
+
+            return Ok(_mapper.Map<SubjectGetDTO>(subject));
         }
 
         
         // PUT: api/Subject/5
         // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
         [HttpPut("{id}")]
-        public async Task<IActionResult> PutSubject(int subjectId, SubjectUpdateDTO dto)
+        public async Task<IActionResult> PutSubject(int id, SubjectUpdateDTO dto)
         {
-            // 1. Keressük meg a létező tárgyat
-            var existingSubject = await _context.Subjects.FindAsync(subjectId);
-            
-            if (existingSubject == null)
+            if (id != dto.Id) return BadRequest("Az ID-k nem egyeznek.");
+
+            var subject = await _unitOfWork.SubjectRepository.FindByIdAsync(id);
+            if (subject == null) return NotFound();
+
+            // Kód egyediség ellenőrzése, ha megváltozott a kód
+            if (subject.Code != dto.Code)
             {
-                return NotFound();
+                var codeExists = await _unitOfWork.SubjectRepository.GetAllAsync(s => s.Code == dto.Code);
+                if (codeExists.Any()) return BadRequest("Az új tantárgykód már foglalt.");
             }
 
-            // 2. Kód egyediség ellenőrzése
-            // Csak akkor nézzük, ha a kód megváltozott!
-            if (existingSubject.Code != dto.Code && await _context.Subjects.AnyAsync(s => s.Code == dto.Code))
-            {
-                return BadRequest("Ez a tantárgy kód már használatban van egy másik tárgynál.");
-            }
+            // AutoMapper: rátöltjük a DTO-t a létező entitásra
+            _mapper.Map(dto, subject);
 
-            // 3. Módosítások átvezetése
-            existingSubject.Code = dto.Code;
-            existingSubject.Name = dto.Name;
-            existingSubject.Credits = dto.Credits;
-
-            try
-            {
-                await _context.SaveChangesAsync();
-            }
-            catch (DbUpdateConcurrencyException)
-            {
-                if (!_context.Subjects.Any(s => s.Id == subjectId)) return NotFound();
-                else throw;
-            }
+            _unitOfWork.SubjectRepository.Update(subject);
+            await _unitOfWork.SaveAsync();
 
             return NoContent();
         }
@@ -107,31 +83,21 @@ namespace EduManager.Controllers
         [HttpPost]
         public async Task<ActionResult<SubjectGetDTO>> PostSubject(SubjectCreateDTO dto)
         {
-            // Ellenőrzés: ne legyen két ugyanolyan kódú tárgy (pl. két PROG1)
-            if (await _context.Subjects.AnyAsync(s => s.Code == dto.Code))
+            // Ellenőrizzük, létezik-e már ilyen kódú tárgy (akár inaktív is!)
+            var existing = await _unitOfWork.SubjectRepository.GetAllAsync(s => s.Code == dto.Code);
+            if (existing.Any())
             {
-                return BadRequest("Ezzel a kóddal már létezik tantárgy.");
+                return BadRequest("Ez a tantárgykód már foglalt.");
             }
-            
-            var subject = new Subject
-            {
-                Code = dto.Code,
-                Name = dto.Name,
-                Credits = dto.Credits,
-                IsActive = true
-            };
 
-            _context.Subjects.Add(subject);
-            await _context.SaveChangesAsync();
+            var subject = _mapper.Map<Subject>(dto);
+            subject.IsActive = true;
 
-            return CreatedAtAction(nameof(GetSubject), new { subjectId = subject.Id }, new SubjectGetDTO 
-            { 
-                Id = subject.Id,
-                Code = subject.Code,
-                Name = subject.Name,
-                Credits = subject.Credits,
-                IsActive = true 
-            });
+            _unitOfWork.SubjectRepository.Add(subject);
+            await _unitOfWork.SaveAsync();
+
+            var resultDto = _mapper.Map<SubjectGetDTO>(subject);
+            return CreatedAtAction(nameof(GetSubject), new { id = subject.Id }, resultDto);
         }
 
         
@@ -139,21 +105,14 @@ namespace EduManager.Controllers
         [HttpPost("{id}/deactivate")]
         public async Task<IActionResult> DeactivateSubject(int id)
         {
-            var subject = await _context.Subjects.FindAsync(id);
-            if (subject == null)
-            {
-                return NotFound();
-            }
-
-            if (!subject.IsActive)
-            {
-                return BadRequest("A tantárgy már alapból inaktív.");
-            }
+            var subject = await _unitOfWork.SubjectRepository.FindByIdAsync(id);
+            if (subject == null) return NotFound();
 
             subject.IsActive = false;
-            await _context.SaveChangesAsync();
+            _unitOfWork.SubjectRepository.Update(subject);
+            await _unitOfWork.SaveAsync();
 
-            return Ok(new { message = $"Subject {id} deactivated successfully." });
+            return Ok(new { message = "Tantárgy inaktiválva." });
         }
         
         
@@ -161,117 +120,124 @@ namespace EduManager.Controllers
         [HttpPost("{id}/reactivate")]
         public async Task<IActionResult> ReactivateSubject(int id)
         {
-            var subject = await _context.Subjects.FindAsync(id);
-            if (subject == null)
-            {
-                return NotFound();
-            }
-
-            if (subject.IsActive)
-            {
-                return BadRequest("A tantárgy már alapból aktív.");
-            }
+            var subject = await _unitOfWork.SubjectRepository.FindByIdAsync(id);
+            if (subject == null) return NotFound();
 
             subject.IsActive = true;
-            await _context.SaveChangesAsync();
+            _unitOfWork.SubjectRepository.Update(subject);
+            await _unitOfWork.SaveAsync();
 
-            return Ok(new { message = $"Subject {id} reactivated successfully." });
+            return Ok(new { message = "Tantárgy aktiválva." });
         }
         
         
         
         
         // <=== JELENTKEZÉSEK ===>
-        // POST /api/subjects/{subjectId}/register
         [HttpPost("{subjectId}/register")]
         public async Task<IActionResult> RegisterToSubject(int subjectId, SubjectRegisterDTO dto)
         {
             // 1. Hallgató ellenőrzése
-            var student = await _context.Users.FindAsync(dto.StudentId);
+            var student = await _unitOfWork.UserRepository.FindByIdAsync(dto.StudentId);
             if (student == null || student.Role != UserRole.Student || !student.IsActive)
-            {
                 return BadRequest("Érvénytelen vagy inaktív hallgató.");
-            }
 
-            // 2. Kurzusok betöltése és alapvető ellenőrzések
-            var coursesToRegister = await _context.Courses
-                .Include(c => c.Students) // Kell a létszámellenőrzéshez
-                .Where(c => dto.CourseIds.Contains(c.Id))
-                .ToListAsync();
+            // 2. Kurzusok betöltése (Include Students kell a létszámhoz)
+            var includes = new[] { "Students" };
+            var coursesToRegister = await _unitOfWork.CourseRepository.GetAllAsync(
+                c => dto.CourseIds.Contains(c.Id), includes);
 
             if (coursesToRegister.Count != dto.CourseIds.Count)
-            {
                 return BadRequest("Egy vagy több kurzus ID érvénytelen.");
-            }
 
-            // --- VALIDÁCIÓK A SPECIFIKÁCIÓ SZERINT ---
+            // --- SZABÁLYOK ELLENŐRZÉSE ---
 
-            // A: Minden kurzus ehhez a tárgyhoz tartozik-e?
+            // A: Minden kurzus ehhez a tárgyhoz tartozik?
             if (coursesToRegister.Any(c => c.SubjectId != subjectId))
-            {
-                return BadRequest("Minden választott kurzusnak a megadott tárgyhoz kell tartoznia.");
-            }
+                return BadRequest("Minden kurzusnak a megadott tárgyhoz kell tartoznia.");
 
-            // B: Minden kurzus ugyanahhoz a félévhez tartozik-e?
-            var semesters = coursesToRegister.Select(c => c.Semester).Distinct();
-            if (semesters.Count() > 1)
-            {
-                return BadRequest("Az összes felvett kurzusnak ugyanahhoz a félévhez kell tartoznia.");
-            }
-            string currentSemester = semesters.First();
+            // B: Minden kurzus ugyanahhoz a félévhez tartozik?
+            var semester = coursesToRegister.First().Semester;
+            if (coursesToRegister.Any(c => c.Semester != semester))
+                return BadRequest("Minden kurzusnak ugyanahhoz a félévhez kell tartoznia.");
 
-            // C: Tagozat ellenőrzése (Nappalis -> Nappali/Combined, Levelezős -> Levelező/Combined)
+            // C: Tagozat ellenőrzése
             foreach (var course in coursesToRegister)
             {
-                bool isCompatible = false;
-                if (course.Form == CourseForm.Combined) isCompatible = true;
-                else if (student.StudyMode == StudyMode.FullTime && course.Form == CourseForm.FullTime) isCompatible = true;
-                else if (student.StudyMode == StudyMode.PartTime && course.Form == CourseForm.PartTime) isCompatible = true;
-
-                if (!isCompatible)
-                {
-                    return BadRequest($"A(z) {course.CourseCode} kurzus tagozata nem felel meg a hallgató képzési rendjének.");
-                }
+                bool compatible = course.Form == CourseForm.Combined || 
+                                 (student.StudyMode == StudyMode.FullTime && course.Form == CourseForm.FullTime) ||
+                                 (student.StudyMode == StudyMode.PartTime && course.Form == CourseForm.PartTime);
+                if (!compatible)
+                    return BadRequest($"A(z) {course.CourseCode} kurzus tagozata nem megfelelő.");
             }
 
             // D: Létszámkeret ellenőrzése
             if (coursesToRegister.Any(c => c.Students.Count >= c.MaxStudents))
-            {
                 return BadRequest("Egy vagy több kurzus betelt.");
-            }
 
-            // E: "Minden elérhető típusból pontosan egyet" szabály
-            // Megnézzük, milyen típusok (elmélet/gyak/labor) érhetőek el ebből a tárgyból ebben a félévben a hallgatónak
-            var availableTypes = await _context.Courses
-                .Where(c => c.SubjectId == subjectId && c.Semester == currentSemester && 
-                           (c.Form == CourseForm.Combined || 
-                            (student.StudyMode == StudyMode.FullTime && c.Form == CourseForm.FullTime) ||
-                            (student.StudyMode == StudyMode.PartTime && c.Form == CourseForm.PartTime)))
-                .Select(c => c.Type)
-                .Distinct()
-                .ToListAsync();
+            // E: Kurzustípusok ellenőrzése (Minden elérhető típusból pontosan egy)
+            // Megnézzük, milyen típusok (Theory/Practice/Lab) hirdettek meg ebben a félévben a tagozatnak
+            var availableCourses = await _unitOfWork.CourseRepository.GetAllAsync(c => 
+                c.SubjectId == subjectId && c.Semester == semester &&
+                (c.Form == CourseForm.Combined || 
+                 (student.StudyMode == StudyMode.FullTime && c.Form == CourseForm.FullTime) ||
+                 (student.StudyMode == StudyMode.PartTime && c.Form == CourseForm.PartTime)));
 
+            var requiredTypes = availableCourses.Select(c => c.Type).Distinct().ToList();
             var pickedTypes = coursesToRegister.Select(c => c.Type).ToList();
 
-            if (availableTypes.Count != pickedTypes.Count || !availableTypes.All(t => pickedTypes.Contains(t)))
-            {
-                return BadRequest("A tantárgy teljesítéséhez szükséges összes kurzustípust fel kell venni pontosan egyszer.");
-            }
+            if (requiredTypes.Count != pickedTypes.Count || pickedTypes.Distinct().Count() != pickedTypes.Count)
+                return BadRequest("Minden szükséges kurzustípusból (elmélet, gyakorlat, stb.) pontosan egyet kell felvenni.");
 
-            // 3. MENTÉS
+            // 3. Mentés (Kapcsolótábla frissítése)
             foreach (var course in coursesToRegister)
             {
                 course.Students.Add(student);
+                _unitOfWork.CourseRepository.Update(course);
             }
 
-            await _context.SaveChangesAsync();
-            return Ok(new { message = "Sikeres tárgyfelvétel." });
+            await _unitOfWork.SaveAsync();
+            return Ok(new { message = "Sikeres tárgyfelvétel!" });
         }
         
-
-        private bool SubjectExists(int id)
+        
+        [HttpPost("{subjectId}/unregister")]
+        public async Task<IActionResult> UnregisterFromSubject(int subjectId, SubjectUnregisterDTO dto)
         {
-            return _context.Subjects.Any(e => e.Id == id);
+            var includes = new[] { "Students" };
+            // Kikérjük az összes olyan kurzust, amin a hallgató rajta van az adott tárgyból és félévből
+            var courses = await _unitOfWork.CourseRepository.GetAllAsync(c => 
+                    c.SubjectId == subjectId && 
+                    c.Semester == dto.Semester && 
+                    c.Students.Any(s => s.Id == dto.StudentId), 
+                includes);
+
+            if (!courses.Any()) return BadRequest("A hallgató nincs feliratkozva erre a tárgyra ebben a félévben.");
+
+            var student = await _unitOfWork.UserRepository.FindByIdAsync(dto.StudentId);
+
+            foreach (var course in courses)
+            {
+                course.Students.Remove(student!);
+                _unitOfWork.CourseRepository.Update(course);
+            }
+
+            await _unitOfWork.SaveAsync();
+            return Ok(new { message = "Sikeres lejelentkezés." });
+        }
+        
+        
+        [HttpGet("{subjectId}/students")]
+        public async Task<ActionResult<IEnumerable<UserGetDTO>>> GetSubjectStudents(int subjectId, [FromQuery] string semester)
+        {
+            var includes = new[] { "Students" };
+            var courses = await _unitOfWork.CourseRepository.GetAllAsync(c => 
+                c.SubjectId == subjectId && c.Semester == semester, includes);
+
+            // Összeszedjük az összes hallgatót az összes kurzusról (duplikációk nélkül)
+            var students = courses.SelectMany(c => c.Students).DistinctBy(s => s.Id).ToList();
+
+            return Ok(_mapper.Map<List<UserGetDTO>>(students));
         }
     }
 }
