@@ -12,7 +12,18 @@ builder.Services.AddControllers();
 
 // Swagger generátor hozzáadása
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+{
+    options.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo { Title = "EduManager API", Version = "v1" });
+
+    var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
+    var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+    
+    if (File.Exists(xmlPath))
+    {
+        options.IncludeXmlComments(xmlPath);
+    }
+});
 builder.Services.AddAutoMapper(config => { }, Assembly.GetExecutingAssembly());
 builder.Services.AddScoped<IUnitOfWork, SimpleUnitOfWork>();
 builder.Services.AddHostedService<NotificationBackgroundService>();
@@ -28,14 +39,12 @@ var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
 {
-    // Ez generálja a JSON dokumentációt
     app.UseSwagger();
     
-    // Ez hozza létre a vizuális felületet a böngészőben
     app.UseSwaggerUI(options =>
     {
         options.SwaggerEndpoint("/swagger/v1/swagger.json", "v1");
-        options.RoutePrefix = string.Empty; // Így a főoldalon (localhost:5000) rögtön a Swagger fogad
+        options.RoutePrefix = string.Empty;
     });
 }
 
@@ -45,10 +54,6 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-/*app.UseHttpsRedirection();
-
-app.UseAuthorization();*/
-
 app.MapControllers();
 
 using (var scope = app.Services.CreateScope())
@@ -57,12 +62,11 @@ using (var scope = app.Services.CreateScope())
     try
     {
         var context = services.GetRequiredService<EduDbContext>();
-        // Itt hívjuk meg a saját inicializálónkat
+        // Inicializáló meghívása
         DbInitializer.Initialize(context);
     }
     catch (Exception ex)
     {
-        // Itt logolhatod, ha valami hiba történt az adatbázis elérésekor
         Console.WriteLine("Hiba történt az adatbázis inicializálásakor: " + ex.Message);
         if (ex.InnerException != null)
         {
@@ -70,17 +74,5 @@ using (var scope = app.Services.CreateScope())
         }
     }
 }
-
-/*// Felhasználók kilistázása ellenőrzéshez
-app.MapGet("/test-users", (EduDbContext context) => 
-{
-    return context.Users.ToList();
-});
-
-// Tantárgyak kilistázása ellenőrzéshez
-app.MapGet("/test-subjects", (EduDbContext context) => 
-{
-    return context.Subjects.ToList();
-});*/
 
 app.Run();

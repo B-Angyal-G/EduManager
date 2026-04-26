@@ -150,9 +150,7 @@ namespace EduManager.Controllers
             if (toCourse.Students.Count >= toCourse.MaxStudents)
                 return BadRequest("A célkurzus betelt.");
 
-            // Validálás: Tagozat megfelel? (A tagozatellenőrzés ugyanaz, mint a regisztrációnál)
-            // ... (ide jöhet a tagozat ellenőrzése, ha nagyon precíz akarsz lenni)
-
+            // Validálás: Tagozat megfelel?
             fromCourse.Students.Remove(student);
             toCourse.Students.Add(student);
 
@@ -223,6 +221,85 @@ namespace EduManager.Controllers
             await _unitOfWork.SaveAsync();
 
             return Ok(new { message = $"{schedules.Count} időpont rögzítve." });
+        }
+        
+        
+        /// <summary>
+        /// Egy kurzus teljes órarendjének felülírása/módosítása.
+        /// </summary>
+        /// <remarks>
+        /// Ez a végpont **törli az összes korábbi időpontot** a kurzushoz, és újakat generál a megadott adatok alapján.
+        /// 
+        /// ### Módosítási formátumok:
+        /// 
+        /// **1. Heti rend (weekly):**
+        /// 14 egymást követő hetet generál.
+        /// - `Type`: "weekly"
+        /// - `FirstDate`: Az első óra napja (pl. "2025-09-08")
+        /// - `StartTime`: Kezdés (pl. "08:00:00")
+        /// - `EndTime`: Befejezés (pl. "10:00:00")
+        /// 
+        /// **2. Tömbösített (blocked):**
+        /// Konkrét, egyedi időpontokat ment el.
+        /// - `Type`: "blocked"
+        /// - `Occurrences`: Lista a konkrét kezdő és végidőpontokkal.
+        /// 
+        /// </remarks>
+        /// <param name="courseId">A kurzus azonosítója</param>
+        /// <param name="dto">Az új órarend adatai</param>
+        /// <response code="200">Sikeres módosítás</response>
+        /// <response code="404">A kurzus nem található</response>
+        [HttpPost("{courseId}/schedule/modify")]
+        public async Task<IActionResult> ModifySchedule(int courseId, ScheduleCreateDTO dto)
+        {
+            // 1. Kurzus ellenőrzése
+            var course = await _unitOfWork.CourseRepository.FindByIdAsync(courseId);
+            if (course == null) return NotFound("A kurzus nem található.");
+
+            // 2. Régi időpontok lekérése és törlése
+            var oldSchedules = await _unitOfWork.CourseScheduleRepository.GetAllAsync(s => s.CourseId == courseId);
+            foreach (var old in oldSchedules)
+            {
+                _unitOfWork.CourseScheduleRepository.Delete(old);
+            }
+
+            // 3. Új időpontok generálása
+            var newSchedules = new List<CourseSchedule>();
+
+            if (dto.Type == "weekly")
+            {
+                if (!dto.FirstDate.HasValue || !dto.StartTime.HasValue || !dto.EndTime.HasValue)
+                    return BadRequest("Heti rend esetén a kezdő dátum és az időpontok kötelezőek.");
+
+                for (int i = 0; i < 14; i++)
+                {
+                    var date = dto.FirstDate.Value.AddDays(i * 7);
+                    newSchedules.Add(new CourseSchedule
+                    {
+                        CourseId = courseId,
+                        StartTime = date.Date.Add(dto.StartTime.Value),
+                        EndTime = date.Date.Add(dto.EndTime.Value)
+                    });
+                }
+            }
+            else if (dto.Type == "blocked" && dto.Occurrences != null)
+            {
+                foreach (var occ in dto.Occurrences)
+                {
+                    newSchedules.Add(new CourseSchedule 
+                    { 
+                        CourseId = courseId, 
+                        StartTime = occ.Start, 
+                        EndTime = occ.End 
+                    });
+                }
+            }
+
+            // 4. Mentés
+            foreach (var s in newSchedules) _unitOfWork.CourseScheduleRepository.Add(s);
+            await _unitOfWork.SaveAsync();
+
+            return Ok(new { message = "Az órarend sikeresen frissítve.", count = newSchedules.Count });
         }
     }
 }

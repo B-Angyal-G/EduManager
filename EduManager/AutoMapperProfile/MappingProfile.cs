@@ -23,6 +23,7 @@ public class MappingProfile : Profile
         // SUBJECT leképezések
         CreateMap<Subject, SubjectGetDTO>();
         CreateMap<SubjectCreateDTO, Subject>();
+        CreateMap<SubjectUpdateDTO, Subject>();
 
         // COURSE leképezések
         CreateMap<Course, CourseGetDTO>()
@@ -32,8 +33,8 @@ public class MappingProfile : Profile
             .ForMember(dest => dest.HoursDescription, opt => opt.MapFrom(src => 
                 $"{src.Hours} {(src.HourUnit == HourType.Weekly ? "heti" : "féléves")}"))
             .ForMember(dest => dest.TeacherNames, opt => opt.MapFrom(src => src.Teachers.Select(t => t.Username).ToList()));
-
         CreateMap<CourseCreateDTO, Course>();
+        CreateMap<CourseUpdateDTO, Course>();
         
         // NOTIFICATION leképezések
         CreateMap<NotificationLog, NotificationGetDTO>()

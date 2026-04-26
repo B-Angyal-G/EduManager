@@ -40,7 +40,7 @@ namespace EduManager.Controllers
 
         
         // GET: api/Subject/5
-        [HttpGet("{subjectId}")]
+        [HttpGet("{id}")]
         public async Task<ActionResult<SubjectGetDTO>> GetSubject(int id)
         {
             var subject = await _unitOfWork.SubjectRepository.FindByIdAsync(id);
@@ -142,7 +142,7 @@ namespace EduManager.Controllers
             if (student == null || student.Role != UserRole.Student || !student.IsActive)
                 return BadRequest("Érvénytelen vagy inaktív hallgató.");
 
-            // 2. Kurzusok betöltése (Include Students kell a létszámhoz)
+            // 2. Kurzusok betöltése
             var includes = new[] { "Students" };
             var coursesToRegister = await _unitOfWork.CourseRepository.GetAllAsync(
                 c => dto.CourseIds.Contains(c.Id), includes);

@@ -12,8 +12,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace EduManager.Migrations
 {
     [DbContext(typeof(EduDbContext))]
-    [Migration("20260425232924_ScheduleAndNotification")]
-    partial class ScheduleAndNotification
+    [Migration("20260426010958_init")]
+    partial class init
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -24,6 +24,36 @@ namespace EduManager.Migrations
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
+
+            modelBuilder.Entity("CourseUser", b =>
+                {
+                    b.Property<int>("CoursesId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("StudentsId")
+                        .HasColumnType("int");
+
+                    b.HasKey("CoursesId", "StudentsId");
+
+                    b.HasIndex("StudentsId");
+
+                    b.ToTable("CourseStudents", (string)null);
+                });
+
+            modelBuilder.Entity("CourseUser1", b =>
+                {
+                    b.Property<int>("CourseId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TeachersId")
+                        .HasColumnType("int");
+
+                    b.HasKey("CourseId", "TeachersId");
+
+                    b.HasIndex("TeachersId");
+
+                    b.ToTable("CourseTeachers", (string)null);
+                });
 
             modelBuilder.Entity("EduManager.Entities.Course", b =>
                 {
@@ -69,7 +99,7 @@ namespace EduManager.Migrations
                     b.ToTable("Courses");
                 });
 
-            modelBuilder.Entity("EduManager.Entities.Notification", b =>
+            modelBuilder.Entity("EduManager.Entities.CourseSchedule", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -80,17 +110,48 @@ namespace EduManager.Migrations
                     b.Property<int>("CourseId")
                         .HasColumnType("int");
 
+                    b.Property<DateTime>("EndTime")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("StartTime")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CourseId");
+
+                    b.ToTable("CourseSchedules");
+                });
+
+            modelBuilder.Entity("EduManager.Entities.NotificationLog", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("ClassStartTime")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("CourseId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<string>("Message")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime>("SentAt")
-                        .HasColumnType("datetime2");
 
                     b.Property<int>("UserId")
                         .HasColumnType("int");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CourseId");
+
+                    b.HasIndex("UserId");
 
                     b.ToTable("Notifications");
                 });
@@ -133,12 +194,6 @@ namespace EduManager.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<int?>("CourseId")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("CourseId1")
-                        .HasColumnType("int");
-
                     b.Property<string>("Email")
                         .IsRequired()
                         .HasColumnType("nvarchar(450)");
@@ -162,14 +217,40 @@ namespace EduManager.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CourseId");
-
-                    b.HasIndex("CourseId1");
-
                     b.HasIndex("Email")
                         .IsUnique();
 
                     b.ToTable("Users");
+                });
+
+            modelBuilder.Entity("CourseUser", b =>
+                {
+                    b.HasOne("EduManager.Entities.Course", null)
+                        .WithMany()
+                        .HasForeignKey("CoursesId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("EduManager.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("StudentsId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("CourseUser1", b =>
+                {
+                    b.HasOne("EduManager.Entities.Course", null)
+                        .WithMany()
+                        .HasForeignKey("CourseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("EduManager.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("TeachersId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("EduManager.Entities.Course", b =>
@@ -183,22 +264,34 @@ namespace EduManager.Migrations
                     b.Navigation("Subject");
                 });
 
-            modelBuilder.Entity("EduManager.Entities.User", b =>
+            modelBuilder.Entity("EduManager.Entities.CourseSchedule", b =>
                 {
-                    b.HasOne("EduManager.Entities.Course", null)
-                        .WithMany("Students")
-                        .HasForeignKey("CourseId");
+                    b.HasOne("EduManager.Entities.Course", "Course")
+                        .WithMany()
+                        .HasForeignKey("CourseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
-                    b.HasOne("EduManager.Entities.Course", null)
-                        .WithMany("Teachers")
-                        .HasForeignKey("CourseId1");
+                    b.Navigation("Course");
                 });
 
-            modelBuilder.Entity("EduManager.Entities.Course", b =>
+            modelBuilder.Entity("EduManager.Entities.NotificationLog", b =>
                 {
-                    b.Navigation("Students");
+                    b.HasOne("EduManager.Entities.Course", "Course")
+                        .WithMany()
+                        .HasForeignKey("CourseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
-                    b.Navigation("Teachers");
+                    b.HasOne("EduManager.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Course");
+
+                    b.Navigation("User");
                 });
 #pragma warning restore 612, 618
         }

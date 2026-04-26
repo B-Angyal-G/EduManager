@@ -16,4 +16,5 @@ public class User
     public UserRole Role { get; set; } 
     public StudyMode StudyMode { get; set; } = StudyMode.None;
     public bool IsActive { get; set; } = true; 
+    public ICollection<Course> Courses { get; set; } = new List<Course>();
 }
