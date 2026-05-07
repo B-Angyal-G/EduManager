@@ -9,5 +9,7 @@ public interface IUnitOfWork
     IRepository<Course> CourseRepository { get; }
     IRepository<CourseSchedule> CourseScheduleRepository { get; }
     IRepository<NotificationLog> NotificationRepository { get; }
+    IRepository<Grade> GradeRepository { get; }
+    IRepository<Signature> SignatureRepository { get; }
     Task SaveAsync();
 }

@@ -14,6 +14,8 @@ public class EduDbContext : DbContext
     public DbSet<Course> Courses { get; set; }
     public DbSet<CourseSchedule> CourseSchedules { get; set; }
     public DbSet<NotificationLog> Notifications { get; set; }
+    public DbSet<Grade> Grades { get; set; }
+    public DbSet<Signature> Signatures { get; set; }
     
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

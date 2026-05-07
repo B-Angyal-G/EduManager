@@ -4,6 +4,8 @@ using EduManager.DTO.UserDto;
 using EduManager.DTO.SubjectDTO;
 using EduManager.DTO.CourseDTO;
 using EduManager.DTO.NotificationDTO;
+using EduManager.DTO.GradeDTO;
+using EduManager.DTO.SignatureDTO;
 
 namespace EduManager.Mappings;
 
@@ -40,5 +42,21 @@ public class MappingProfile : Profile
         CreateMap<NotificationLog, NotificationGetDTO>()
             .ForMember(dest => dest.UserName, opt => opt.MapFrom(src => src.User != null ? src.User.Username : "Ismeretlen"))
             .ForMember(dest => dest.CourseCode, opt => opt.MapFrom(src => src.Course != null ? src.Course.CourseCode : "N/A"));
+        
+        // GRADE leképezések
+        CreateMap<Grade, GradeGetDTO>()
+            .ForMember(dest => dest.StudentName, opt => opt.MapFrom(src => src.Student != null ? src.Student.Username : "Ismeretlen"))
+            .ForMember(dest => dest.SubjectName, opt => opt.MapFrom(src => src.Subject != null ? src.Subject.Name : "Ismeretlen"));
+        
+        // Aláírás lekérés mappolása (nevekkel)
+        CreateMap<Signature, SignatureGetDTO>()
+            .ForMember(dest => dest.StudentName, opt => opt.MapFrom(src => 
+                src.Student != null ? src.Student.Username : "Ismeretlen"))
+            .ForMember(dest => dest.SubjectName, opt => opt.MapFrom(src => 
+                src.Subject != null ? src.Subject.Name : "Ismeretlen"));
+
+        // Aláírás létrehozás mappolása (DTO -> Entity)
+        CreateMap<SignatureCreateDTO, Signature>()
+            .ForMember(dest => dest.IsSigned, opt => opt.MapFrom(src => src.Value));
     }
 }

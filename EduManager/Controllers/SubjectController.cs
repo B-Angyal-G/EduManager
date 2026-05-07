@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using EduManager.Data;
+using EduManager.DTO.GradeDTO;
 using EduManager.DTO.SubjectDTO;
 using EduManager.DTO.UserDto;
 using EduManager.Entities;
@@ -238,6 +239,88 @@ namespace EduManager.Controllers
             var students = courses.SelectMany(c => c.Students).DistinctBy(s => s.Id).ToList();
 
             return Ok(_mapper.Map<List<UserGetDTO>>(students));
+        }
+        
+        
+        
+        
+        // <=== JEGYADÁS ===>
+        [HttpGet("{subjectId}/grades")]
+        public async Task<IActionResult> GetSubjectGrades(int subjectId, [FromQuery] string semester)
+        {
+            var allGrades = await _unitOfWork.GradeRepository.GetAllAsync(
+                g => g.SubjectId == subjectId && g.Semester == semester,
+                new[] { "Student", "Subject" });
+            
+            if (!allGrades.Any()) return NotFound("Nincsenek jegyek rögzítve ehhez a tárgyhoz.");
+
+            // LINQ GroupBy: Hallgatónként csoportosítunk, és minden csoportból a legfrissebbet vesszük
+            var latestGrades = allGrades
+                .GroupBy(g => g.StudentId)
+                .Select(group => group.OrderByDescending(g => g.Time).First())
+                .ToList();
+
+            return Ok(_mapper.Map<IEnumerable<GradeGetDTO>>(latestGrades));
+        }
+        
+        
+        
+        
+        // <=== STATISZTIKA ===>
+        // GET /api/subjects/{subjectId}/administrationCheck?semester=2025/26/2
+        [HttpGet("{subjectId}/administrationCheck")]
+        public async Task<IActionResult> GetAdminCheck(int subjectId, [FromQuery] string semester)
+        {
+            // 1. Kik vették fel a tárgyat? (Kurzusokon keresztül)
+            var courses = await _unitOfWork.CourseRepository.GetAllAsync(
+                c => c.SubjectId == subjectId && c.Semester == semester, new[] { "Students" });
+            
+            var students = courses.SelectMany(c => c.Students).DistinctBy(s => s.Id).ToList();
+            var issues = new List<string>();
+
+            foreach (var student in students)
+            {
+                var sigs = await _unitOfWork.SignatureRepository.GetAllAsync(s => s.StudentId == student.Id && s.SubjectId == subjectId && s.Semester == semester);
+                var grades = await _unitOfWork.GradeRepository.GetAllAsync(g => g.StudentId == student.Id && g.SubjectId == subjectId && g.Semester == semester);
+
+                if (!sigs.Any() && !grades.Any())
+                    issues.Add($"{student.Username}: Sem aláírás, sem jegy nincs beírva.");
+                else if (sigs.Any() && sigs.OrderByDescending(s => s.Time).First().IsSigned && !grades.Any())
+                    issues.Add($"{student.Username}: Aláírást szerzett, de hiányzik az érdemjegy.");
+            }
+
+            return Ok(new { subjectId, semester, issues });
+        }
+
+        // GET /api/subjects/{subjectId}/gradeStatistics?semester=2025/26/2
+        [HttpGet("{subjectId}/gradeStatistics")]
+        public async Task<IActionResult> GetStats(int subjectId, [FromQuery] string semester)
+        {
+            var courses = await _unitOfWork.CourseRepository.GetAllAsync(c => c.SubjectId == subjectId && c.Semester == semester, new[] { "Students" });
+            var studentIds = courses.SelectMany(c => c.Students).Select(s => s.Id).Distinct().ToList();
+
+            var stats = new Dictionary<string, int> { { "5", 0 }, { "4", 0 }, { "3", 0 }, { "2", 0 }, { "1", 0 }, { "Denied", 0 }, { "Incomplete", 0 } };
+
+            foreach (var id in studentIds)
+            {
+                // Megnézzük az aláírást
+                var sigs = await _unitOfWork.SignatureRepository.GetAllAsync(s => s.StudentId == id && s.SubjectId == subjectId && s.Semester == semester);
+                var latestSig = sigs.OrderByDescending(s => s.Time).FirstOrDefault();
+
+                if (latestSig != null && !latestSig.IsSigned) {
+                    stats["Denied"]++;
+                    continue;
+                }
+
+                // Megnézzük a jegyet
+                var grades = await _unitOfWork.GradeRepository.GetAllAsync(g => g.StudentId == id && g.SubjectId == subjectId && g.Semester == semester);
+                var latestGrade = grades.OrderByDescending(g => g.Time).FirstOrDefault();
+
+                if (latestGrade != null) stats[latestGrade.GradeValue.ToString()]++;
+                else stats["Incomplete"]++;
+            }
+
+            return Ok(new { totalStudents = studentIds.Count, distribution = stats });
         }
     }
 }

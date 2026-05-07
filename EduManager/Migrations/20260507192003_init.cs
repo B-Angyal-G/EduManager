@@ -72,6 +72,66 @@ namespace EduManager.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "Grades",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    SubjectId = table.Column<int>(type: "int", nullable: false),
+                    StudentId = table.Column<int>(type: "int", nullable: false),
+                    Semester = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    GradeValue = table.Column<int>(type: "int", nullable: false),
+                    Time = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_Grades", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_Grades_Subjects_SubjectId",
+                        column: x => x.SubjectId,
+                        principalTable: "Subjects",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                    table.ForeignKey(
+                        name: "FK_Grades_Users_StudentId",
+                        column: x => x.StudentId,
+                        principalTable: "Users",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "Signatures",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    SubjectId = table.Column<int>(type: "int", nullable: false),
+                    StudentId = table.Column<int>(type: "int", nullable: false),
+                    Semester = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    IsSigned = table.Column<bool>(type: "bit", nullable: false),
+                    Time = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_Signatures", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_Signatures_Subjects_SubjectId",
+                        column: x => x.SubjectId,
+                        principalTable: "Subjects",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                    table.ForeignKey(
+                        name: "FK_Signatures_Users_StudentId",
+                        column: x => x.StudentId,
+                        principalTable: "Users",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "CourseSchedules",
                 columns: table => new
                 {
@@ -196,6 +256,16 @@ namespace EduManager.Migrations
                 column: "TeachersId");
 
             migrationBuilder.CreateIndex(
+                name: "IX_Grades_StudentId",
+                table: "Grades",
+                column: "StudentId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Grades_SubjectId",
+                table: "Grades",
+                column: "SubjectId");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_Notifications_CourseId",
                 table: "Notifications",
                 column: "CourseId");
@@ -204,6 +274,16 @@ namespace EduManager.Migrations
                 name: "IX_Notifications_UserId",
                 table: "Notifications",
                 column: "UserId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Signatures_StudentId",
+                table: "Signatures",
+                column: "StudentId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Signatures_SubjectId",
+                table: "Signatures",
+                column: "SubjectId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_Subjects_Code",
@@ -231,7 +311,13 @@ namespace EduManager.Migrations
                 name: "CourseTeachers");
 
             migrationBuilder.DropTable(
+                name: "Grades");
+
+            migrationBuilder.DropTable(
                 name: "Notifications");
+
+            migrationBuilder.DropTable(
+                name: "Signatures");
 
             migrationBuilder.DropTable(
                 name: "Courses");

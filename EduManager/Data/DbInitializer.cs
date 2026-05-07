@@ -82,14 +82,15 @@ public class DbInitializer
                 CourseCode = "PROG1-LAB-01", SubjectId = prog1.Id, Type = CourseType.Lab, 
                 Form = CourseForm.FullTime, Semester = semester, MaxStudents = 2, // Tesztelni a betelt kurzust
                 Teachers = new List<User> { teachers[0] },
-                Students = new List<User> { students[0] } 
+                Students = new List<User> { students[0], students[3], students[4] } 
             },
 
             // === ADATB1 (Adatbáziskezelés I.) ===
             new() { 
                 CourseCode = "ADATB1-COMB-ELM", SubjectId = adatb1.Id, Type = CourseType.Theory, 
                 Form = CourseForm.Combined, Semester = semester, MaxStudents = 50,
-                Teachers = new List<User> { teachers[1] } 
+                Teachers = new List<User> { teachers[1] },
+                Students = new List<User> { students[2], students[10], students[13] } 
             },
             new() { 
                 CourseCode = "ADATB1-GYAK-FT", SubjectId = adatb1.Id, Type = CourseType.Practice, 
@@ -99,7 +100,8 @@ public class DbInitializer
             new() { 
                 CourseCode = "ADATB1-GYAK-PT", SubjectId = adatb1.Id, Type = CourseType.Practice, 
                 Form = CourseForm.PartTime, Semester = semester, MaxStudents = 15,
-                Teachers = new List<User> { teachers[2] } 
+                Teachers = new List<User> { teachers[2] },
+                Students = new List<User> { students[11], students[13], students[14] } 
             },
 
             // === WEB2 (Webfejlesztés II.) ===
@@ -118,12 +120,14 @@ public class DbInitializer
             new() { 
                 CourseCode = "ALGO1-ELM-01", SubjectId = algo1.Id, Type = CourseType.Theory,
                 Form = CourseForm.FullTime, Semester = semester, MaxStudents = 100,
-                Teachers = new List<User> { teachers[2] } 
+                Teachers = new List<User> { teachers[2] },
+                Students = new List<User> { students[0], students[1], students[6] } 
             },
             new() { 
                 CourseCode = "ALGO1-GYAK-01", SubjectId = algo1.Id, Type = CourseType.Practice, 
                 Form = CourseForm.FullTime, Semester = semester, MaxStudents = 20,
-                Teachers = new List<User> { teachers[2] } 
+                Teachers = new List<User> { teachers[2] },
+                Students = new List<User> { students[0], students[1], students[6] } 
             }
         };
 
